@@ -121,6 +121,10 @@ class TimelineViewController: NSViewController, LiveTimelineFocusDelegate, LiveT
   private var messageEdit: MessageEditState?
   private var updatingTimelineItems = false
   private var appliedFontSize = TimelineTypography.fontSize
+  private var messageStyle = MessageLayoutStyle.current
+  /// Whether each message ended its sender's run at the last update, to redraw rows whose
+  /// bubble gains or loses its time label and avatar.
+  private var bubbleGroupEnds: [String: Bool] = [:]
 
   private struct ReadingAnchor {
     let id: String
@@ -149,8 +153,99 @@ class TimelineViewController: NSViewController, LiveTimelineFocusDelegate, LiveT
     self.windowState = windowState
     self.timeline = timeline
     self.composer = composer
-    self.projection = TimelineRowProjection(items: timeline.timelineItems)
+    self.projection = TimelineRowProjection(
+      items: timeline.timelineItems,
+      profilePolicy: Self.profileRowPolicy(
+        style: messageStyle, isDirect: timeline.room.roomInfo?.isDirect == true))
     super.init(nibName: nil, bundle: nil)
+  }
+
+  // MARK: Bubbles
+
+  private static func profileRowPolicy(style: MessageLayoutStyle, isDirect: Bool)
+    -> ProfileRowPolicy
+  {
+    guard style == .bubbles else { return .always }
+    // Bubbles show names only for other people in group chats.
+    return ProfileRowPolicy { event in !isDirect && !event.isOwn }
+  }
+
+  private var isDirectChat: Bool {
+    timeline.room.roomInfo?.isDirect == true
+  }
+
+  private func bubblePlacement(forRow row: Int, event: MatrixRustSDK.EventTimelineItem)
+    -> MessageBubblePlacement?
+  {
+    guard messageStyle == .bubbles else { return nil }
+    var isLastInGroup = true
+    if row + 1 < timelineItems.count,
+      case .message(_, let next, _) = timelineItems[row + 1], next.sender == event.sender
+    {
+      isLastInGroup = false
+    }
+    return MessageBubblePlacement(
+      isOwn: event.isOwn, showsAvatarColumn: !event.isOwn && !isDirectChat,
+      isLastInGroup: isLastInGroup)
+  }
+
+  /// Rows whose message started or stopped ending its sender's run since the last call.
+  private func bubbleGroupEndChanges() -> IndexSet {
+    guard messageStyle == .bubbles else {
+      bubbleGroupEnds = [:]
+      return []
+    }
+    var changed = IndexSet()
+    var ends: [String: Bool] = [:]
+    for (row, item) in timelineItems.enumerated() {
+      guard case .message(_, let event, _) = item,
+        let placement = bubblePlacement(forRow: row, event: event)
+      else { continue }
+      ends[item.id] = placement.isLastInGroup
+      if let previous = bubbleGroupEnds[item.id], previous != placement.isLastInGroup {
+        changed.insert(row)
+      }
+    }
+    bubbleGroupEnds = ends
+    return changed
+  }
+
+  func updateMessageStyle(_ style: MessageLayoutStyle) {
+    guard style != messageStyle else { return }
+    messageStyle = style
+    guard isViewLoaded else {
+      projection = TimelineRowProjection(
+        items: timeline.timelineItems,
+        profilePolicy: Self.profileRowPolicy(style: style, isDirect: isDirectChat))
+      return
+    }
+
+    closeReactionPicker()
+    hideHoverOverlay()
+    let followBottom = documentView.isAtBottom
+    let oldIDs = timelineItems.map(\.id)
+    projection = TimelineRowProjection(
+      items: timeline.timelineItems,
+      profilePolicy: Self.profileRowPolicy(style: style, isDirect: isDirectChat))
+    measurementMessageViews.removeAll()
+    bubbleGroupEnds = [:]
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0
+      context.allowsImplicitAnimation = false
+      applyProjectedRows(oldIDs: oldIDs, changedIDs: Set(timelineItems.map(\.id)))
+      let rows = IndexSet(integersIn: 0..<tableView.numberOfRows)
+      tableView.noteHeightOfRows(withIndexesChanged: rows)
+      tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
+      scrollView.layoutSubtreeIfNeeded()
+      documentView.updateGeometry()
+      if followBottom {
+        let clipView = scrollView.contentView
+        var bounds = clipView.bounds
+        bounds.origin.y = documentView.bottomAlignedOriginY
+        clipView.scroll(to: clipView.constrainBoundsRect(bounds).origin)
+        scrollView.reflectScrolledClipView(clipView)
+      }
+    }
   }
 
   func tearDown() {
@@ -241,10 +336,12 @@ class TimelineViewController: NSViewController, LiveTimelineFocusDelegate, LiveT
 
       switch item {
       case .profile(item: _, let event):
+        let bubbleNameInset =
+          self.messageStyle == .bubbles ? MessageBubbleMetrics.incomingNameInset : nil
         if let recycledView = tableView.makeView(withIdentifier: item.reuseIdentifier, owner: self)
           as? MessageProfileRowView
         {
-          recycledView.configure(event: event)
+          recycledView.configure(event: event, bubbleNameInset: bubbleNameInset)
           return recycledView
         } else {
           let view = MessageProfileRowView()
@@ -253,7 +350,7 @@ class TimelineViewController: NSViewController, LiveTimelineFocusDelegate, LiveT
             focusUser: { [weak self] in
               self?.windowState.focusUser(userId: $0)
             })
-          view.configure(event: event)
+          view.configure(event: event, bubbleNameInset: bubbleNameInset)
           view.identifier = item.reuseIdentifier
           return view
         }
@@ -297,6 +394,11 @@ class TimelineViewController: NSViewController, LiveTimelineFocusDelegate, LiveT
         view.onArrowKey = { [weak self] direction in
           self?.moveSelection(direction)
         }
+        view.initializeSenderAvatar(
+          imageLoader: appState.matrixClient,
+          focusUser: { [weak self] in
+            self?.windowState.focusUser(userId: $0)
+          })
         view.onMediaPreviewRequest = { [weak self] in
           self?.closeActiveMediaPreview(eventIdentifier: event.eventOrTransactionId.id) ?? false
         }
@@ -325,7 +427,8 @@ class TimelineViewController: NSViewController, LiveTimelineFocusDelegate, LiveT
             guard let self else { return false }
             self.handleMatrixUri(matrixUri)
             return true
-          }
+          },
+          bubble: self.bubblePlacement(forRow: row, event: event)
         )
         view.setSelected(tableView.selectedRow == row)
         view.identifier = kind.reuseIdentifier
@@ -1062,6 +1165,7 @@ class TimelineViewController: NSViewController, LiveTimelineFocusDelegate, LiveT
     for (row, id) in newIDs.enumerated() where changedIDs.contains(id) && oldIDSet.contains(id) {
       changedRows.insert(row)
     }
+    changedRows.formUnion(bubbleGroupEndChanges())
     if !changedRows.isEmpty {
       tableView.noteHeightOfRows(withIndexesChanged: changedRows)
       tableView.reloadData(forRowIndexes: changedRows, columnIndexes: IndexSet(integer: 0))
@@ -1307,7 +1411,8 @@ extension TimelineViewController: NSTableViewDelegate {
     let item = timelineItems[row]
 
     if case .profile = item {
-      return MessageProfileRowView.rowHeight
+      return messageStyle == .bubbles
+        ? MessageProfileRowView.bubbleRowHeight : MessageProfileRowView.rowHeight
     }
 
     if case .typingIndicator = item {
@@ -1334,7 +1439,8 @@ extension TimelineViewController: NSTableViewDelegate {
         width: tableView.tableColumns[0].width,
         replyDetails: replyDetails(for: content),
         reactions: event.reactions,
-        receiptCount: event.readReceipts.count
+        receiptCount: event.readReceipts.count,
+        bubble: bubblePlacement(forRow: row, event: event)
       )
     }
 

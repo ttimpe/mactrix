@@ -67,9 +67,10 @@ final class ChatRoomViewController: NSViewController {
     return nil
   }
 
-  func update(fontSize: Int, reduceTransparency: Bool) {
+  func update(fontSize: Int, messageStyle: MessageLayoutStyle, reduceTransparency: Bool) {
     loadViewIfNeeded()
     timelineController.updateFontSize(fontSize)
+    timelineController.updateMessageStyle(messageStyle)
     composerController.update(fontSize: fontSize, reduceTransparency: reduceTransparency)
   }
 

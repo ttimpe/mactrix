@@ -159,6 +159,30 @@ enum MentionText {
 /// Keeps speculative measurements independent of the displayed text view's layout and selection.
 @MainActor
 enum MentionTextLayout {
+  /// The width of the widest laid-out line, at most `maxWidth`.
+  static func width(for text: NSAttributedString, maxWidth: CGFloat) -> CGFloat {
+    let content = NSTextContentStorage()
+    let manager = NSTextLayoutManager()
+    content.addTextLayoutManager(manager)
+    let container = NSTextContainer(
+      size: NSSize(width: max(1, maxWidth), height: .greatestFiniteMagnitude))
+    container.lineFragmentPadding = 0
+    manager.textContainer = container
+    content.textStorage?.setAttributedString(text)
+    manager.ensureLayout(for: content.documentRange)
+    var width: CGFloat = 0
+    manager.enumerateTextLayoutFragments(
+      from: content.documentRange.location, options: [.ensuresLayout]
+    ) { fragment in
+      for line in fragment.textLineFragments {
+        width = max(width, fragment.layoutFragmentFrame.minX + line.typographicBounds.maxX)
+      }
+      return true
+    }
+    // Round up so the text view doesn't wrap the widest line again.
+    return min(max(1, maxWidth), ceil(width) + 1)
+  }
+
   static func height(
     for text: NSAttributedString, width: CGFloat, inset: NSSize = .zero,
     lineFragmentPadding: CGFloat = 0, minimumLineHeight: CGFloat = 0

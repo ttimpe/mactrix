@@ -6,6 +6,7 @@ struct ChatRoomViewRepresentable: NSViewControllerRepresentable {
   @Environment(WindowState.self) private var windowState
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @AppStorage("fontSize") private var fontSize = 13
+  @AppStorage(MessageLayoutStyle.defaultsKey) private var messageStyle = MessageLayoutStyle.standard
 
   let timeline: LiveTimeline
   let composer: ChatComposerState
@@ -16,7 +17,8 @@ struct ChatRoomViewRepresentable: NSViewControllerRepresentable {
   }
 
   func updateNSViewController(_ controller: ChatRoomViewController, context: Context) {
-    controller.update(fontSize: fontSize, reduceTransparency: reduceTransparency)
+    controller.update(
+      fontSize: fontSize, messageStyle: messageStyle, reduceTransparency: reduceTransparency)
   }
 
   static func dismantleNSViewController(_ controller: ChatRoomViewController, coordinator: ()) {

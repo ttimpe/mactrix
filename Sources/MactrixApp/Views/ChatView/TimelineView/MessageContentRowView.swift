@@ -11,10 +11,18 @@ protocol MessageContentRowView: NSView {
   func configure(content: MatrixRustSDK.MsgLikeContent, matrixClient: MatrixClient?)
   func height(for content: MatrixRustSDK.MsgLikeContent, width: CGFloat) -> CGFloat
   func configureEditing(_ state: MessageEditState?)
+  /// The width the content needs, at most `maxWidth`. Chat bubbles shrink to this width.
+  func preferredWidth(for content: MatrixRustSDK.MsgLikeContent, maxWidth: CGFloat) -> CGFloat
+  /// Draws text in colours readable on the accent-coloured bubble of own messages.
+  func setTextOnAccent(_ onAccent: Bool)
 }
 
 extension MessageContentRowView {
   func configureEditing(_ state: MessageEditState?) {}
+  func preferredWidth(for content: MatrixRustSDK.MsgLikeContent, maxWidth: CGFloat) -> CGFloat {
+    maxWidth
+  }
+  func setTextOnAccent(_ onAccent: Bool) {}
 }
 
 /// Media rows deliver downloaded files to their owning timeline controller.

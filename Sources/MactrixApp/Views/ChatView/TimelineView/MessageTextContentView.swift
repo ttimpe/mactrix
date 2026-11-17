@@ -13,6 +13,8 @@ final class MessageTextContentView: NSView, MessageContentRowView {
   var onArrowKey: ((TimelineSelectionDirection) -> Void)?
 
   private let bodyText = MessageTextView(frame: .zero)
+  private var defaultLinkAttributes: [NSAttributedString.Key: Any]?
+  private var textOnAccent = false
 
   var cachedEditingView: MessageEditingView? = nil
   public var isEditing: Bool { cachedEditingView?.isEditing ?? false }
@@ -20,6 +22,7 @@ final class MessageTextContentView: NSView, MessageContentRowView {
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
 
+    defaultLinkAttributes = bodyText.linkTextAttributes
     bodyText.isVerticallyResizable = true
     bodyText.onMouseDown = { [weak self] in self?.onSelectRequest?() }
     bodyText.onArrowKey = { [weak self] direction in self?.onArrowKey?(direction) }
@@ -44,8 +47,31 @@ final class MessageTextContentView: NSView, MessageContentRowView {
     setText(Self.attributedCaption(caption, formatted: formatted), matrixClient: matrixClient)
   }
 
+  func setTextOnAccent(_ onAccent: Bool) {
+    textOnAccent = onAccent
+    bodyText.linkTextAttributes =
+      onAccent
+      ? [
+        .foregroundColor: NSColor.white, .underlineStyle: NSUnderlineStyle.single.rawValue,
+        .cursor: NSCursor.pointingHand,
+      ]
+      : defaultLinkAttributes
+  }
+
+  func preferredWidth(for content: MatrixRustSDK.MsgLikeContent, maxWidth: CGFloat) -> CGFloat {
+    if let cachedEditingView, cachedEditingView.isEditing {
+      return maxWidth
+    }
+    return MentionTextLayout.width(
+      for: MentionText.replacingUserLinks(in: Self.attributedBody(for: content)),
+      maxWidth: maxWidth)
+  }
+
   private func setText(_ text: NSAttributedString, matrixClient: MatrixClient?) {
-    let text = MentionText.replacingUserLinks(in: text, imageLoader: matrixClient)
+    var text = MentionText.replacingUserLinks(in: text, imageLoader: matrixClient)
+    if textOnAccent {
+      text = Self.recoloredForAccent(text)
+    }
     bodyText.textStorage?.setAttributedString(text)
     if let matrixClient {
       MentionAvatarLoader.shared(for: matrixClient).restoreAvatars(in: text)
@@ -89,6 +115,23 @@ final class MessageTextContentView: NSView, MessageContentRowView {
 
     bodyText.isHidden = state != nil
     editingView.isHidden = state == nil
+  }
+
+  /// White text for the accent-coloured bubble, keeping secondary text slightly dimmed.
+  private static func recoloredForAccent(_ text: NSAttributedString) -> NSAttributedString {
+    let result = NSMutableAttributedString(attributedString: text)
+    let fullRange = NSRange(location: 0, length: result.length)
+    result.enumerateAttribute(.foregroundColor, in: fullRange) { value, range, _ in
+      let color = value as? NSColor
+      let isSecondary =
+        color == .secondaryLabelColor || color == .tertiaryLabelColor
+        || color == .placeholderTextColor
+      result.addAttribute(
+        .foregroundColor,
+        value: isSecondary ? NSColor.white.withAlphaComponent(0.75) : NSColor.white,
+        range: range)
+    }
+    return result
   }
 
   private func measure(_ text: NSAttributedString, width: CGFloat) -> CGFloat {

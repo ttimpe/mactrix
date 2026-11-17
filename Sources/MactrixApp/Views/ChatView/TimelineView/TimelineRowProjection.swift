@@ -2,6 +2,15 @@ import MatrixRustSDK
 import OSLog
 import os.signpost
 
+/// Decides which messages start with a row showing the sender.
+struct ProfileRowPolicy {
+  /// Called for the first message of each run from the same sender.
+  let showsProfile: (MatrixRustSDK.EventTimelineItem) -> Bool
+
+  /// Every run of messages starts with the sender's name and avatar.
+  static var always: ProfileRowPolicy { ProfileRowPolicy { _ in true } }
+}
+
 /// Maps contiguous SDK item ranges to ordered table rows, collapsing consecutive
 /// state events into a single segment and row.
 struct TimelineRowProjection {
@@ -18,12 +27,14 @@ struct TimelineRowProjection {
   private(set) var sourceItems: [TimelineItem]
   private var segments: [Segment]
   private(set) var rows: [TimelineItemRowInfo]
+  private let profilePolicy: ProfileRowPolicy
 
   let signposter = OSSignposter(logger: Logger.timelineTableView)
 
-  init(items: [TimelineItem]) {
+  init(items: [TimelineItem], profilePolicy: ProfileRowPolicy = .always) {
+    self.profilePolicy = profilePolicy
     sourceItems = items
-    segments = Self.makeSegments(items, previous: nil)
+    segments = Self.makeSegments(items, previous: nil, profilePolicy: profilePolicy)
     rows = Self.flatten(segments)
   }
 
@@ -73,7 +84,7 @@ struct TimelineRowProjection {
   private mutating func reset(to items: [TimelineItem], changedIDs: inout Set<String>) {
     changedIDs.formUnion(segments.flatMap { $0.rows.map(\.id) })
     sourceItems = items
-    segments = Self.makeSegments(items, previous: nil)
+    segments = Self.makeSegments(items, previous: nil, profilePolicy: profilePolicy)
     changedIDs.formUnion(segments.flatMap { $0.rows.map(\.id) })
   }
 
@@ -94,7 +105,8 @@ struct TimelineRowProjection {
     let newEnd = sourceRange.upperBound + items.count - count
     let previous = sourceRange.lowerBound > 0 ? sourceItems[sourceRange.lowerBound - 1] : nil
     let replacement = Self.makeSegments(
-      Array(sourceItems[sourceRange.lowerBound..<newEnd]), previous: previous
+      Array(sourceItems[sourceRange.lowerBound..<newEnd]), previous: previous,
+      profilePolicy: profilePolicy
     )
     changedIDs.formUnion(replacement.flatMap { $0.rows.map(\.id) })
     segments.replaceSubrange(segmentRange, with: replacement)
@@ -124,7 +136,9 @@ struct TimelineRowProjection {
     return (segments.count..<segments.count, requested.lowerBound..<requested.upperBound)
   }
 
-  private static func makeSegments(_ items: [TimelineItem], previous: TimelineItem?) -> [Segment] {
+  private static func makeSegments(
+    _ items: [TimelineItem], previous: TimelineItem?, profilePolicy: ProfileRowPolicy
+  ) -> [Segment] {
     var previousSender = sender(of: previous)
     var segments: [Segment] = []
     var stateItems: [TimelineItemRowInfo.StateEntry] = []
@@ -142,7 +156,7 @@ struct TimelineRowProjection {
         switch event.content {
         case .msgLike(let content):
           flushStateRun()
-          if previousSender != event.sender {
+          if previousSender != event.sender, profilePolicy.showsProfile(event) {
             projectedRows.append(.profile(item: item, event: event))
           }
           projectedRows.append(.message(item: item, event: event, content: content))

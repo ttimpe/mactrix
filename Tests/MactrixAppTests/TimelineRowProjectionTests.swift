@@ -371,3 +371,37 @@ private func expectEquivalent(_ projection: TimelineRowProjection, to expected: 
   }
   #expect(projectedItems.map { $0.uniqueId().id } == expected.map { $0.uniqueId().id })
 }
+
+struct TimelineRowProjectionProfilePolicyTests {
+  private let hideOwn = ProfileRowPolicy { $0.sender != "@me:example.org" }
+
+  @Test func policyHidesProfileRowsForOwnMessages() {
+    let items = [
+      message("a", sender: "@me:example.org"), message("b", sender: "@me:example.org"),
+      message("c", sender: "@bob:example.org"), message("d", sender: "@me:example.org"),
+    ]
+    let projection = TimelineRowProjection(items: items, profilePolicy: hideOwn)
+    #expect(
+      projection.rows.map(\.id) == [
+        "message:a", "message:b", "profile:c", "message:c", "message:d", "typing-indicator",
+      ])
+  }
+
+  @Test func policyAppliesToIncrementalUpdates() {
+    var projection = TimelineRowProjection(
+      items: [message("a", sender: "@me:example.org")], profilePolicy: hideOwn)
+    _ = projection.apply([
+      .pushBack(value: message("b", sender: "@bob:example.org")),
+      .pushBack(value: message("c", sender: "@me:example.org")),
+    ])
+    #expect(
+      projection.rows.map(\.id) == [
+        "message:a", "profile:b", "message:b", "message:c", "typing-indicator",
+      ])
+  }
+
+  @Test func defaultPolicyKeepsProfileRows() {
+    let projection = TimelineRowProjection(items: [message("a", sender: "@me:example.org")])
+    #expect(projection.rows.map(\.id) == ["profile:a", "message:a", "typing-indicator"])
+  }
+}

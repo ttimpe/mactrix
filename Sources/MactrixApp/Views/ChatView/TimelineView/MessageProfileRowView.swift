@@ -13,8 +13,23 @@ class MessageProfileRowView: NSView {
   private lazy var avatarHeightConstraint = profilePicture.heightAnchor.constraint(
     equalToConstant: Self.avatarSize)
 
+  private lazy var nameLeadingToAvatar = name.leadingAnchor.constraint(
+    equalTo: profilePicture.trailingAnchor, constant: 16)
+  private lazy var nameLeadingToRow = name.leadingAnchor.constraint(equalTo: leadingAnchor)
+  private lazy var nameCenterY = name.centerYAnchor.constraint(equalTo: centerYAnchor)
+  private lazy var nameBottom = name.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1)
+
   static var rowHeight: Double {
     max(32, Double(ceil(TimelineTypography.scaled(32))))
+  }
+
+  /// Height of the name-only row above a run of bubbles.
+  static var bubbleRowHeight: Double {
+    Double(ceil(bubbleNameFont.boundingRectForFont.height) + 6)
+  }
+
+  private static var bubbleNameFont: NSFont {
+    .systemFont(ofSize: TimelineTypography.scaled(NSFont.smallSystemFontSize), weight: .medium)
   }
 
   private var dragPayload: UserDragPayload?
@@ -42,9 +57,9 @@ class MessageProfileRowView: NSView {
       avatarWidthConstraint,
       avatarHeightConstraint,
 
-      name.leadingAnchor.constraint(equalTo: profilePicture.trailingAnchor, constant: 16),
+      nameLeadingToAvatar,
       name.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
-      name.centerYAnchor.constraint(equalTo: centerYAnchor),
+      nameCenterY,
     ])
   }
 
@@ -59,11 +74,24 @@ class MessageProfileRowView: NSView {
     profilePicture.initialize(imageLoader: imageLoader, focusUser: focusUser)
   }
 
-  func configure(event: EventTimelineItem) {
+  /// Configures the row. With `bubbleNameInset`, only the sender's name is shown, indented to
+  /// line up with the incoming bubbles below it.
+  func configure(event: EventTimelineItem, bubbleNameInset: CGFloat? = nil) {
+    let isBubble = bubbleNameInset != nil
+    profilePicture.isHidden = isBubble
+    NSLayoutConstraint.deactivate([nameLeadingToAvatar, nameLeadingToRow, nameCenterY, nameBottom])
+    if let bubbleNameInset {
+      nameLeadingToRow.constant = bubbleNameInset
+    }
+    NSLayoutConstraint.activate(
+      isBubble ? [nameLeadingToRow, nameBottom] : [nameLeadingToAvatar, nameCenterY])
     avatarTrailingConstraint.constant = TimelineTypography.timestampColumnWidth
     avatarWidthConstraint.constant = Self.avatarSize
     avatarHeightConstraint.constant = Self.avatarSize
-    name.font = .boldSystemFont(ofSize: TimelineTypography.scaled(NSFont.systemFontSize))
+    name.font =
+      isBubble
+      ? Self.bubbleNameFont
+      : .boldSystemFont(ofSize: TimelineTypography.scaled(NSFont.systemFontSize))
     let username: String
     let avatarUrl: String?
     switch event.senderProfile {
