@@ -48,7 +48,13 @@ public final class WindowState {
 
   var conversationSelection: ConversationMessageSelection?
 
-  public var selectedRoomId: String?
+  public var selectedRoomId: String? {
+    didSet {
+      guard selectedRoomId != oldValue else { return }
+      resetChatSpecificInspectorContent()
+    }
+  }
+
   public var selectedSpaceId: String?
   public var inspectorVisible: Bool = false
 
@@ -89,6 +95,17 @@ public final class WindowState {
     } else {
       inspectorVisible = true
       inspectorContent = .roomInfo
+    }
+  }
+
+  /// A selected user or an open thread belongs to the chat it came from, so switching chats
+  /// returns the inspector to the new chat's info. Search, threads and pins stay as they are.
+  private func resetChatSpecificInspectorContent() {
+    switch inspectorContent {
+    case .userInfo, .focusThread:
+      inspectorContent = .roomInfo
+    case .roomInfo, .search, .roomThreads, .roomPins:
+      break
     }
   }
 
