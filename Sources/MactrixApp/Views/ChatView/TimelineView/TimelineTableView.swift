@@ -155,23 +155,16 @@ class TimelineViewController: NSViewController, LiveTimelineFocusDelegate, LiveT
     self.composer = composer
     self.projection = TimelineRowProjection(
       items: timeline.timelineItems,
-      profilePolicy: Self.profileRowPolicy(
-        style: messageStyle, isDirect: timeline.room.roomInfo?.isDirect == true))
+      profilePolicy: Self.profileRowPolicy(style: messageStyle))
     super.init(nibName: nil, bundle: nil)
   }
 
   // MARK: Bubbles
 
-  private static func profileRowPolicy(style: MessageLayoutStyle, isDirect: Bool)
-    -> ProfileRowPolicy
-  {
+  private static func profileRowPolicy(style: MessageLayoutStyle) -> ProfileRowPolicy {
     guard style == .bubbles else { return .always }
-    // Bubbles show names only for other people in group chats.
-    return ProfileRowPolicy { event in !isDirect && !event.isOwn }
-  }
-
-  private var isDirectChat: Bool {
-    timeline.room.roomInfo?.isDirect == true
+    // Like iMessage, other people's runs start with their name above the first bubble.
+    return ProfileRowPolicy { event in !event.isOwn }
   }
 
   private func bubblePlacement(forRow row: Int, event: MatrixRustSDK.EventTimelineItem)
@@ -185,7 +178,7 @@ class TimelineViewController: NSViewController, LiveTimelineFocusDelegate, LiveT
       isLastInGroup = false
     }
     return MessageBubblePlacement(
-      isOwn: event.isOwn, showsAvatarColumn: !event.isOwn && !isDirectChat,
+      isOwn: event.isOwn, showsAvatarColumn: !event.isOwn,
       isLastInGroup: isLastInGroup)
   }
 
@@ -216,7 +209,7 @@ class TimelineViewController: NSViewController, LiveTimelineFocusDelegate, LiveT
     guard isViewLoaded else {
       projection = TimelineRowProjection(
         items: timeline.timelineItems,
-        profilePolicy: Self.profileRowPolicy(style: style, isDirect: isDirectChat))
+        profilePolicy: Self.profileRowPolicy(style: style))
       return
     }
 
@@ -226,7 +219,7 @@ class TimelineViewController: NSViewController, LiveTimelineFocusDelegate, LiveT
     let oldIDs = timelineItems.map(\.id)
     projection = TimelineRowProjection(
       items: timeline.timelineItems,
-      profilePolicy: Self.profileRowPolicy(style: style, isDirect: isDirectChat))
+      profilePolicy: Self.profileRowPolicy(style: style))
     measurementMessageViews.removeAll()
     bubbleGroupEnds = [:]
     NSAnimationContext.runAnimationGroup { context in

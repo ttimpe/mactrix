@@ -4,7 +4,7 @@ import AppKit
 struct MessageBubblePlacement: Equatable {
   /// Own messages are drawn on the right in the accent colour.
   let isOwn: Bool
-  /// Whether incoming messages leave room for the sender's avatar (group chats only).
+  /// Whether the row leaves room for the sender's avatar (other people's messages).
   let showsAvatarColumn: Bool
   /// The last message in a run from the same sender shows the time and the sender's avatar.
   let isLastInGroup: Bool
@@ -57,7 +57,7 @@ enum MessageBubbleMetrics {
     return sideInset + avatarColumnWidth(placement)
   }
 
-  /// Leading inset of sender names, aligned with incoming bubbles in group chats.
+  /// Leading inset of sender names, aligned with the incoming bubbles below them.
   static var incomingNameInset: CGFloat {
     sideInset + avatarSize + avatarGap + horizontalPadding
   }
